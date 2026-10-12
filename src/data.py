@@ -50,7 +50,15 @@ def prepare_image(image):
     The web page does these same six steps in JavaScript. If your version is
     different, the self test badge at the top of your page turns red.
     """
-    raise NotImplementedError("Problem 2: fill in prepare_image")
+    from torchvision import transforms
+
+    pipeline = transforms.Compose([
+        transforms.Resize(RESIZE),
+        transforms.CenterCrop(CROP),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=MEAN, std=STD),
+    ])
+    return pipeline(image.convert("RGB")).numpy().astype(np.float32)
 
 
 def load_folder(root):
@@ -83,7 +91,32 @@ def load_folder(root):
     Memory: every image becomes 3 x 224 x 224 numbers of 4 bytes, about 0.6 MB.
     750 images is about 450 MB. That fits on Colab and on most laptops.
     """
-    raise NotImplementedError("Problem 2: fill in load_folder")
+    from pathlib import Path
+
+    from PIL import Image
+
+    root = Path(root)
+    class_names = sorted(p.name for p in root.iterdir() if p.is_dir())
+
+    X, y, paths = [], [], []
+    for label, name in enumerate(class_names):
+        files = sorted(
+            p for p in (root / name).iterdir()
+            if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+        )
+        for path in files:
+            try:
+                image = Image.open(path)
+                image.load()
+            except Exception:
+                continue
+            X.append(prepare_image(image))
+            y.append(label)
+            paths.append(path)
+
+    X = np.stack(X).astype(np.float32) if X else np.zeros((0, 3, CROP, CROP), dtype=np.float32)
+    y = np.asarray(y, dtype=np.int64)
+    return X, y, class_names, paths
 
 
 def split_train_test(X, y, paths, test_ratio=0.2, seed=0):
@@ -102,4 +135,23 @@ def split_train_test(X, y, paths, test_ratio=0.2, seed=0):
         up with a class that has no test images at all, and then your accuracy
         number means nothing.
     """
-    raise NotImplementedError("Problem 2: fill in split_train_test")
+    rng = np.random.default_rng(seed)
+
+    train_idx, test_idx = [], []
+    for label in np.unique(y):
+        idx = np.flatnonzero(y == label)
+        rng.shuffle(idx)
+        n_test = max(1, round(len(idx) * test_ratio))
+        n_test = min(n_test, len(idx) - 1)  # keep at least one in train too
+        test_idx.extend(idx[:n_test])
+        train_idx.extend(idx[n_test:])
+
+    train_idx = np.sort(train_idx)
+    test_idx = np.sort(test_idx)
+
+    X_train, y_train = X[train_idx], y[train_idx]
+    X_test, y_test = X[test_idx], y[test_idx]
+    paths_train = [paths[i] for i in train_idx]
+    paths_test = [paths[i] for i in test_idx]
+
+    return X_train, y_train, paths_train, X_test, y_test, paths_test

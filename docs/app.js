@@ -117,14 +117,35 @@ function showWhatItSees() {
 // Showing the answer
 // ---------------------------------------------------------------------------
 
+function displayName(label) {
+  // "roger_federer" -> "Roger Federer"
+  return label.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+
 function drawBars(probabilities) {
   const ranked = model.labels
     .map((name, index) => ({ name, p: probabilities[index] }))
     .sort((a, b) => b.p - a.p);
 
+  const top = ranked[0];
+  const hasAnswer = ranked.some((item) => item.p > 0);
+  const nameEl = $("resultName");
+  const confEl = $("resultConf");
+  if (hasAnswer) {
+    nameEl.textContent = displayName(top.name);
+    nameEl.classList.remove("empty");
+    confEl.textContent = `${(top.p * 100).toFixed(1)}% confident`;
+    confEl.classList.remove("empty");
+  } else {
+    nameEl.textContent = "No image yet";
+    nameEl.classList.add("empty");
+    confEl.textContent = "—";
+    confEl.classList.add("empty");
+  }
+
   $("bars").innerHTML = ranked.map((item, place) => `
-    <div class="row${place === 0 ? " top" : ""}">
-      <div class="name">${item.name}</div>
+    <div class="bars-row${place === 0 ? " top" : ""}">
+      <div class="bars-name">${displayName(item.name)}</div>
       <div class="bar"><div class="fill" style="width:${(item.p * 100).toFixed(1)}%"></div></div>
       <div class="pct">${(item.p * 100).toFixed(1)}%</div>
     </div>`).join("");
@@ -196,21 +217,20 @@ async function runSelfTest(cases) {
 }
 
 // ---------------------------------------------------------------------------
-// Wiring up the three ways of giving it a picture
+// Wiring up the two ways of giving it a picture
 // ---------------------------------------------------------------------------
 
 function showPanel(which) {
   // A webcam left running would keep replacing the answer for an uploaded
-  // picture or a drawing, so leaving its tab turns it off.
+  // picture, so leaving its tab turns it off.
   if (which !== "Cam") cameraOff();
-  for (const name of ["Cam", "File", "Draw"]) {
+  for (const name of ["Cam", "File"]) {
     $("panel" + name).hidden = name !== which;
     $("tab" + name).classList.toggle("on", name === which);
   }
 }
 $("tabCam").onclick = () => showPanel("Cam");
 $("tabFile").onclick = () => showPanel("File");
-$("tabDraw").onclick = () => showPanel("Draw");
 
 // Webcam
 const video = $("video");
@@ -289,64 +309,33 @@ if (navigator.mediaDevices) {
   navigator.mediaDevices.addEventListener("devicechange", listCameras);
 }
 
-// Upload
-$("file").onchange = async (event) => {
-  const chosen = event.target.files[0];
+// Upload, by clicking the dropzone or dragging a file onto it
+async function useFile(chosen) {
   if (!chosen) return;
   const image = await loadImage(URL.createObjectURL(chosen));
   const preview = $("preview");
   preview.src = image.src;
   preview.hidden = false;
-  preview.style.maxHeight = "240px";
   classify(image);
-};
+}
+$("file").onchange = (event) => useFile(event.target.files[0]);
 
-// Drawing
-const pad = $("drawPad");
-const padContext = pad.getContext("2d", { willReadFrequently: true });
-function clearPad() {
-  padContext.fillStyle = "#ffffff";
-  padContext.fillRect(0, 0, pad.width, pad.height);
-}
-clearPad();
-padContext.lineWidth = 16;
-padContext.lineCap = "round";
-padContext.lineJoin = "round";
-padContext.strokeStyle = "#000000";
-
-let drawing = false;
-function padPoint(event) {
-  const box = pad.getBoundingClientRect();
-  const point = event.touches ? event.touches[0] : event;
-  return {
-    x: (point.clientX - box.left) * (pad.width / box.width),
-    y: (point.clientY - box.top) * (pad.height / box.height),
-  };
-}
-function startStroke(event) {
-  event.preventDefault();
-  drawing = true;
-  const { x, y } = padPoint(event);
-  padContext.beginPath();
-  padContext.moveTo(x, y);
-}
-function continueStroke(event) {
-  if (!drawing) return;
-  event.preventDefault();
-  const { x, y } = padPoint(event);
-  padContext.lineTo(x, y);
-  padContext.stroke();
-  classify(pad);
-}
-function endStroke() {
-  if (!drawing) return;
-  drawing = false;
-  classify(pad);
-}
-pad.addEventListener("pointerdown", startStroke);
-pad.addEventListener("pointermove", continueStroke);
-window.addEventListener("pointerup", endStroke);
-$("clearPad").onclick = () => { clearPad(); };
+const dropzone = $("dropzone");
+["dragenter", "dragover"].forEach((type) =>
+  dropzone.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropzone.classList.add("drag");
+  })
+);
+["dragleave", "drop"].forEach((type) =>
+  dropzone.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("drag");
+  })
+);
+dropzone.addEventListener("drop", (event) => {
+  useFile(event.dataTransfer.files[0]);
+});
 
 // ---------------------------------------------------------------------------
 // Start
@@ -363,10 +352,9 @@ async function start() {
       executionProviders: ["wasm"],
     });
 
-    document.title = model.labels.join(" / ");
-    $("title").textContent = model.labels.join("  ·  ");
+    document.title = model.labels.map(displayName).join(" / ");
     $("subtitle").textContent =
-      `${model.labels.length} classes, ResNet18 on ` +
+      `Tells ${model.labels.map(displayName).join(", ")} apart. ResNet18, ` +
       `${model.input.crop}x${model.input.crop} colour input, ` +
       `${model.n_parameters.toLocaleString()} parameters.`;
 

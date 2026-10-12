@@ -32,12 +32,21 @@ def predict_logits(model, X, batch_size=64):
     next(model.parameters()).device, and bring the answers back with .cpu().
     Work in batches so that a large test set does not run you out of memory.
     """
-    raise NotImplementedError("Problem 3: fill in predict_logits")
+    device = next(model.parameters()).device
+    model.eval()
+    outputs = []
+    with torch.no_grad():
+        for start in range(0, len(X), batch_size):
+            xb = torch.as_tensor(X[start:start + batch_size], dtype=torch.float32)
+            out = model(xb.to(device))
+            outputs.append(out.cpu().numpy())
+    return np.concatenate(outputs, axis=0).astype(np.float32)
 
 
 def accuracy(model, X, y):
     """Return the share of rows the model gets right, as a float 0.0 to 1.0."""
-    raise NotImplementedError("Problem 3: fill in accuracy")
+    predictions = predict_logits(model, X).argmax(axis=1)
+    return float((predictions == y).mean())
 
 
 def confusion_matrix(model, X, y, num_classes):
@@ -47,7 +56,11 @@ def confusion_matrix(model, X, y, num_classes):
     how many images of class i the model called class j. The diagonal is the
     ones it got right.
     """
-    raise NotImplementedError("Problem 3: fill in confusion_matrix")
+    predictions = predict_logits(model, X).argmax(axis=1)
+    matrix = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for true_label, predicted_label in zip(y, predictions):
+        matrix[true_label][predicted_label] += 1
+    return matrix
 
 
 def worst_examples(model, X, y, paths, k=10):
@@ -66,7 +79,22 @@ def worst_examples(model, X, y, paths, k=10):
     These are the images to put in your report. A mistake the model was sure
     about tells you much more than a mistake it was unsure about.
     """
-    raise NotImplementedError("Problem 5: fill in worst_examples")
+    logits = predict_logits(model, X)
+    probs = torch.softmax(torch.as_tensor(logits), dim=1).numpy()
+    predictions = probs.argmax(axis=1)
+
+    mistakes = []
+    for i in range(len(y)):
+        if predictions[i] != y[i]:
+            mistakes.append({
+                "path": paths[i],
+                "true": int(y[i]),
+                "predicted": int(predictions[i]),
+                "confidence": float(probs[i, predictions[i]]),
+            })
+
+    mistakes.sort(key=lambda m: m["confidence"], reverse=True)
+    return mistakes[:k]
 
 
 # ---------------------------------------------------------------------------
